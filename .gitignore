@@ -1,0 +1,13 @@
+﻿# Gradle / Android build
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.ap_
+captures/
+.externalNativeBuild/
+.cxx/
+keystore.properties
