@@ -170,7 +170,6 @@ class LightViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
         if (!ensureAudio()) return
         applySettings(_settings.value)
-        torch.sensitivity = _settings.value.sensitivity
         torch.start()
         _runningTorch.value = true
     }
@@ -207,7 +206,6 @@ class LightViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSensitivity(value: Float) {
         _settings.update { it.copy(sensitivity = value) }
-        torch.sensitivity = value
         applySettings(_settings.value)
     }
 

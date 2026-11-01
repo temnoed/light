@@ -78,8 +78,8 @@ class AudioAnalyzer(
     private var prevMid = 0f
     private var noiseFloor = 0.005f
     // АРУ: непрерывная автоматическая регулировка усиления.
-    // АРУ отключён: работает на сыром RMS.
-
+    private var peakRms = 0.01f
+    private var gain = 1f
     // Тишина: если RMS ниже порога несколько кадров подряд — не считаем биты.
     private var silenceFrames = 0
     private val SILENCE_THRESHOLD = 0.015f
@@ -125,6 +125,8 @@ class AudioAnalyzer(
         prevLevel = 0f
         prevMid = 0f
         noiseFloor = 0.005f
+        peakRms = 0.01f
+        gain = 1f
         beatPulse = 0f
         brightness = 0f
         lastFrameMs = 0L
@@ -180,19 +182,26 @@ class AudioAnalyzer(
         }
         val isSilent = silenceFrames >= SILENCE_FRAMES_LIMIT
 
-        // Бит ищется по общему уровню громкости (RMS).
+        // --- АРУ (непрерывное): нормирует громкость ---
+        peakRms = if (rms > peakRms) rms else peakRms + (rms - peakRms) * 0.05f
+        val targetGain = (0.12f / peakRms.coerceAtLeast(0.001f)).coerceIn(1f, 6f)
+        gain += (targetGain - gain) * 0.05f
+        val level = (rms * gain).coerceIn(0f, 1f)
+
+        // Бит ищется по общему уровню громкости (RMS), а не по басу.
         val meanLevel = meanLevel()
-        noiseFloor += if (rms < noiseFloor) {
-            (rms - noiseFloor) * 0.08f
+        noiseFloor += if (level < noiseFloor) {
+            (level - noiseFloor) * 0.08f
         } else {
-            (rms - noiseFloor) * 0.002f
+            (level - noiseFloor) * 0.002f
         }
 
         // СЧ-полоса (800–2000 Гц): атаки барабанов/гитары на тихой музыке.
         var midEnergy = 0.0
         for (b in midLo..midHi) midEnergy += mags[b].toDouble() * mags[b]
         val mid = (sqrt(midEnergy) * 2.0).toFloat().coerceIn(0f, 1f)
-        val midOnset = mid - prevMid
+        val midLevel = (mid * gain).coerceIn(0f, 1f)
+        val midOnset = midLevel - prevMid
 
         val sensitivityNow = sensitivity.coerceIn(0.2f, 5f)
         val base = max(noiseFloor * 1.7f, meanLevel * 1.15f)
@@ -202,7 +211,7 @@ class AudioAnalyzer(
         } else {
             base / sensitivityNow + 0.010f
         }
-        val onset = rms - prevLevel
+        val onset = level - prevLevel
         val onsetGate = if (strict) {
             (0.006f / sensitivityNow).coerceAtLeast(0.003f)
         } else {
@@ -222,21 +231,21 @@ class AudioAnalyzer(
         var beat = false
         if (!isSilent) {
             // Бит срабатывает, если хотя бы один канал (общий уровень ИЛИ СЧ-атака) превысил порог.
-            val generalBeat = armed && onset > onsetGate && rms > threshold && rms > absoluteGate
-            val midBeat = armed && midOnset > midOnsetGate && mid > midAbsoluteGate
+            val generalBeat = armed && onset > onsetGate && level > threshold && level > absoluteGate
+            val midBeat = armed && midOnset > midOnsetGate && midLevel > midAbsoluteGate
             if ((generalBeat || midBeat) && nowMs - lastBeatMs > minInterval) {
                 beat = true
                 armed = false
-                lastBeatLevel = max(rms, mid)
+                lastBeatLevel = max(level, midLevel)
                 lastBeatMs = nowMs
                 beats++
             }
         } else {
             armed = true
         }
-        prevLevel = rms
-        prevMid = mid
-        pushLevel(rms)
+        prevLevel = level
+        prevMid = midLevel
+        pushLevel(level)
 
         beatPulse *= exp(-dt / 90f)
         if (beat) beatPulse = 1f
@@ -288,7 +297,7 @@ class AudioAnalyzer(
             brightness = brightness.coerceIn(0f, 1f),
             beatPulse = beatPulse.coerceIn(0f, 1f),
             beats = beats,
-            gain = 1f,
+            gain = gain,
             mid = mid
         )
     }
