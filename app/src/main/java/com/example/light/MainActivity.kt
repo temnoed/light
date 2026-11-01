@@ -114,7 +114,6 @@ private fun LightApp(viewModel: LightViewModel) {
                 runWithPermission { viewModel.startScreen() }
             }
         },
-        onSensitivity = viewModel::setSensitivity,
         onScreenSensitivity = viewModel::setScreenSensitivity,
         onTestTorch = viewModel::testTorch,
         onDismissError = viewModel::dismissError

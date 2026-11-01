@@ -23,7 +23,7 @@ import kotlinx.coroutines.runInterruptible
 import kotlin.math.roundToInt
 
 data class Settings(
-    val sensitivity: Float = 4f,
+    val sensitivity: Float = 1f,
     val screenSensitivity: Float = 2f
 )
 
@@ -127,7 +127,7 @@ class LightViewModel(application: Application) : AndroidViewModel(application) {
                 val gain = "%.2f".format(frame.rms)
                 Log.d(
                     "Light",
-                    "beat=${frame.beats} bass=$bass tone=${frame.toneHz.toInt()}Hz gain=$gain"
+                    "beat=${frame.beats} bass=$bass tone=${frame.toneHz.toInt()}Hz gain=${String.format("%.2f", frame.gain)} mid=${String.format("%.3f", frame.mid)}"
                 )
             }
             // Раз в секунду пишем уровень сигнала — так видно, слышит ли микрофон.
@@ -170,6 +170,7 @@ class LightViewModel(application: Application) : AndroidViewModel(application) {
         _error.value = null
         if (!ensureAudio()) return
         applySettings(_settings.value)
+        torch.sensitivity = _settings.value.sensitivity
         torch.start()
         _runningTorch.value = true
     }
@@ -206,6 +207,7 @@ class LightViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSensitivity(value: Float) {
         _settings.update { it.copy(sensitivity = value) }
+        torch.sensitivity = value
         applySettings(_settings.value)
     }
 

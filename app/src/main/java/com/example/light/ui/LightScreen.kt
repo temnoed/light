@@ -75,7 +75,6 @@ fun LightScreen(
     state: LightUiState,
     onTorch: () -> Unit,
     onScreen: () -> Unit,
-    onSensitivity: (Float) -> Unit,
     onScreenSensitivity: (Float) -> Unit,
     onTestTorch: () -> Unit,
     onDismissError: () -> Unit
@@ -209,16 +208,10 @@ fun LightScreen(
             Spacer(Modifier.height(18.dp))
 
             SensitivityCard(
-                label = "Чувствительность фонарика",
-                value = state.settings.sensitivity,
-                onValueChange = onSensitivity
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            SensitivityCard(
                 label = "Чувствительность экрана",
                 value = state.settings.screenSensitivity,
+                range = 0.2f..5f,
+                display = { "×${String.format("%.1f", it)}" },
                 onValueChange = onScreenSensitivity
             )
 
@@ -334,7 +327,13 @@ private fun LightButton(
 }
 
 @Composable
-private fun SensitivityCard(label: String, value: Float, onValueChange: (Float) -> Unit) {
+private fun SensitivityCard(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    display: (Float) -> String,
+    onValueChange: (Float) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -347,8 +346,8 @@ private fun SensitivityCard(label: String, value: Float, onValueChange: (Float) 
             SliderRow(
                 title = label,
                 value = value,
-                range = 0.2f..5f,
-                display = "×${String.format("%.1f", value)}",
+                range = range,
+                display = display(value),
                 onValueChange = onValueChange
             )
         }

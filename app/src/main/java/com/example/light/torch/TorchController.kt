@@ -49,6 +49,9 @@ class TorchController(context: Context) {
 
     @Volatile private var brightness = 0f
     @Volatile private var beat = 0f
+
+    /** 0..1 — чувствительность вспышки к сигналу микрофона. */
+    @Volatile var sensitivity: Float = 1f
     @Volatile private var running = false
     @Volatile private var failed = false
 
@@ -75,6 +78,7 @@ class TorchController(context: Context) {
             isDaemon = true
             start()
         }
+        applyOff()
         return true
     }
 
@@ -208,7 +212,6 @@ class TorchController(context: Context) {
         } else {
             (1 + desired * (maxStrength - 1)).roundToInt().coerceIn(1, maxStrength)
         }
-
         if (level != lastHardwareLevel) {
             if (level <= 0) {
                 applyOff()
@@ -228,11 +231,6 @@ class TorchController(context: Context) {
         SystemClock.sleep(40)
     }
 
-    /**
-     * Вкл/выкл без ШИМ: вспышка горит на полной яркости, пока не затух
-     * импульс удара. Никаких сотен переключений в секунду — только один
-     * короткий импульс на бит.
-     */
     private fun onOffTick() {
         val id = cameraId ?: return
         val on = beat >= FLASH_THRESHOLD

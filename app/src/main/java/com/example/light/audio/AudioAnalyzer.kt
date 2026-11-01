@@ -26,7 +26,9 @@ data class AudioFrame(
     val toneHz: Float = 0f,
     val brightness: Float = 0f,
     val beatPulse: Float = 0f,
-    val beats: Int = 0
+    val beats: Int = 0,
+    val gain: Float = 1f,
+    val mid: Float = 0f
 )
 
 /**
@@ -73,7 +75,15 @@ class AudioAnalyzer(
 
     private var lastBeatMs = 0L
     private var prevLevel = 0f
+    private var prevMid = 0f
     private var noiseFloor = 0.005f
+    // АРУ: непрерывная автоматическая регулировка усиления.
+    // АРУ отключён: работает на сыром RMS.
+
+    // Тишина: если RMS ниже порога несколько кадров подряд — не считаем биты.
+    private var silenceFrames = 0
+    private val SILENCE_THRESHOLD = 0.015f
+    private val SILENCE_FRAMES_LIMIT = 20
     private var beatPulse = 0f
     private var brightness = 0f
     private var lastFrameMs = 0L
@@ -92,6 +102,10 @@ class AudioAnalyzer(
     private val toneLo = (60f / binHz).roundToInt().coerceAtLeast(1)
     private val toneHi = (1800f / binHz).roundToInt().coerceIn(toneLo, fftSize / 2 - 2)
 
+    // СЧ-полоса (800–2000 Гц) для тихих барабанов/гитары.
+    private val midLo = (800f / binHz).roundToInt().coerceAtLeast(1)
+    private val midHi = (2000f / binHz).roundToInt().coerceIn(midLo, fftSize / 2 - 2)
+
     /** 0.4..3.0 — насколько легко срабатывает детектор бита. */
     var sensitivity: Float = 4f
 
@@ -109,6 +123,7 @@ class AudioAnalyzer(
         levelHistoryCount = 0
         lastBeatMs = 0L
         prevLevel = 0f
+        prevMid = 0f
         noiseFloor = 0.005f
         beatPulse = 0f
         brightness = 0f
@@ -157,14 +172,27 @@ class AudioAnalyzer(
         for (b in bassLo..bassHi) bassEnergy += mags[b].toDouble() * mags[b]
         val bass = (sqrt(bassEnergy) * 2.0).toFloat().coerceIn(0f, 1f)
 
-        // Бит теперь ищется по общему уровню громкости (RMS), а не по басу:
-        // вспышка реагирует на самые громкие пики музыки, не привязываясь к тону.
+        // --- Тишина: не считаем биты, если сигнал слишком тихий ---
+        if (rms < SILENCE_THRESHOLD) {
+            silenceFrames++
+        } else {
+            silenceFrames = 0
+        }
+        val isSilent = silenceFrames >= SILENCE_FRAMES_LIMIT
+
+        // Бит ищется по общему уровню громкости (RMS).
         val meanLevel = meanLevel()
         noiseFloor += if (rms < noiseFloor) {
             (rms - noiseFloor) * 0.08f
         } else {
             (rms - noiseFloor) * 0.002f
         }
+
+        // СЧ-полоса (800–2000 Гц): атаки барабанов/гитары на тихой музыке.
+        var midEnergy = 0.0
+        for (b in midLo..midHi) midEnergy += mags[b].toDouble() * mags[b]
+        val mid = (sqrt(midEnergy) * 2.0).toFloat().coerceIn(0f, 1f)
+        val midOnset = mid - prevMid
 
         val sensitivityNow = sensitivity.coerceIn(0.2f, 5f)
         val base = max(noiseFloor * 1.7f, meanLevel * 1.15f)
@@ -180,25 +208,34 @@ class AudioAnalyzer(
         } else {
             (0.003f / sensitivityNow).coerceAtLeast(0.0015f)
         }
+        val midOnsetGate = onsetGate * 0.8f
         val absoluteGate = if (strict) KICK_GATE_LEVEL else GATE_LEVEL
+        val midAbsoluteGate = absoluteGate * 0.6f
         val hysteresis = if (strict) 0.72f else 0.55f
         val minInterval = if (strict) KICK_MIN_BEAT_INTERVAL_MS else MIN_BEAT_INTERVAL_MS
 
         if (!armed) {
+            // Re-arming uses raw RMS (not amplified) to avoid AGC keeping level high.
             if (rms < lastBeatLevel * hysteresis) armed = true
         }
 
         var beat = false
-        if (armed && onset > onsetGate && rms > threshold && rms > absoluteGate &&
-            nowMs - lastBeatMs > minInterval
-        ) {
-            beat = true
-            armed = false
-            lastBeatLevel = rms
-            lastBeatMs = nowMs
-            beats++
+        if (!isSilent) {
+            // Бит срабатывает, если хотя бы один канал (общий уровень ИЛИ СЧ-атака) превысил порог.
+            val generalBeat = armed && onset > onsetGate && rms > threshold && rms > absoluteGate
+            val midBeat = armed && midOnset > midOnsetGate && mid > midAbsoluteGate
+            if ((generalBeat || midBeat) && nowMs - lastBeatMs > minInterval) {
+                beat = true
+                armed = false
+                lastBeatLevel = max(rms, mid)
+                lastBeatMs = nowMs
+                beats++
+            }
+        } else {
+            armed = true
         }
         prevLevel = rms
+        prevMid = mid
         pushLevel(rms)
 
         beatPulse *= exp(-dt / 90f)
@@ -250,7 +287,9 @@ class AudioAnalyzer(
             toneHz = toneHz,
             brightness = brightness.coerceIn(0f, 1f),
             beatPulse = beatPulse.coerceIn(0f, 1f),
-            beats = beats
+            beats = beats,
+            gain = 1f,
+            mid = mid
         )
     }
 
